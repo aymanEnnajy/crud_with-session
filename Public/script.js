@@ -6,6 +6,7 @@ const catCount = document.getElementById('catCount');
 const catsCount = document.getElementById('catsCount');
 const emptyState = document.getElementById('emptyState');
 const formSection = document.querySelector('.form-section');
+const tagFilter = document.getElementById('tagFilter');
 
 // Champs du formulaire
 const nameInput = document.getElementById('name_cats');
@@ -41,7 +42,8 @@ modalConfirm.addEventListener('click', async () => {
     if (currentCatId) {
         await deleteCatFromDB(currentCatId);
         confirmationModal.classList.remove('show');
-        fetchCats(searchInput.value);
+        await fetchCats(searchInput.value);
+        populateTagFilter();
         showAlert('Chat supprimé avec succès !', 'success');
     }
 });
@@ -122,7 +124,11 @@ async function fetchCats(search = '') {
     const cats = await getAllCatsFromDB(search);
     catsList.innerHTML = '';
 
-    if (cats.length === 0) {
+    // appliquer filtre par tag si présent
+    const selectedTag = tagFilter ? tagFilter.value : '';
+    const filteredCats = selectedTag ? cats.filter(c => c.tag === selectedTag) : cats;
+
+    if (filteredCats.length === 0) {
         emptyState.style.display = 'block';
         catsList.appendChild(emptyState);
         catCount.textContent = '0';
@@ -131,10 +137,10 @@ async function fetchCats(search = '') {
     }
 
     emptyState.style.display = 'none';
-    catCount.textContent = cats.length;
-    catsCount.textContent = cats.length;
+    catCount.textContent = filteredCats.length;
+    catsCount.textContent = filteredCats.length;
 
-    cats.forEach((cat, index) => {
+    filteredCats.forEach((cat, index) => {
         const div = document.createElement('div');
         div.classList.add('cat-card');
         div.style.animationDelay = `${index * 0.1}s`;
@@ -194,7 +200,8 @@ addBtn.addEventListener('click', async () => {
             addBtn.disabled = false;
         }, 1500);
 
-        fetchCats(searchInput.value);
+        await fetchCats(searchInput.value);
+        populateTagFilter();
     } catch (error) {
         showAlert('Erreur lors de l\'ajout du chat', 'danger');
         addBtn.innerHTML = originalText;
@@ -245,7 +252,8 @@ async function editCat(id) {
         try {
             await updateCatInDB(id, updatedCat);
             editModal.classList.remove('show');
-            fetchCats(searchInput.value);
+            await fetchCats(searchInput.value);
+            populateTagFilter();
             showAlert('Chat modifié avec succès !', 'success');
         } catch (error) {
             showAlert('Erreur lors de la modification', 'danger');
@@ -280,6 +288,27 @@ searchInput.addEventListener('input', (e) => {
     searchTimeout = setTimeout(() => fetchCats(e.target.value), 300);
 });
 
+// Remplir la sélection des tags
+async function populateTagFilter() {
+    if (!tagFilter) return;
+    const cats = await getAllCatsFromDB();
+    const tags = Array.from(new Set(cats.map(c => c.tag).filter(Boolean)));
+    // conserver la sélection courante si possible
+    const current = tagFilter.value || '';
+    tagFilter.innerHTML = '<option value="">Tous les tags</option>';
+    tags.sort().forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t;
+        opt.textContent = t;
+        tagFilter.appendChild(opt);
+    });
+    if (current) tagFilter.value = current;
+}
+
+if (tagFilter) {
+    tagFilter.addEventListener('change', () => fetchCats(searchInput.value));
+}
+
 // Fonction d'alerte
 function showAlert(message, type = 'info') {
     const alertMessage = document.getElementById('alertMessage');
@@ -304,6 +333,7 @@ function showAlert(message, type = 'info') {
 // Initialisation
 document.addEventListener('DOMContentLoaded', () => {
     fetchCats();
+    populateTagFilter();
     const title = document.querySelector('.header h1');
     if (title) title.style.animation = 'fadeInDown 0.8s ease';
 });
