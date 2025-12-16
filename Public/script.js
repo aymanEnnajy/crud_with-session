@@ -23,8 +23,6 @@ const alertOk = document.getElementById('alertOk');
 
 // Variables pour la gestion
 let currentCatId = null;
-let catsDatabase = [];
-let nextId = 1;
 
 // Initialiser les modales
 document.querySelectorAll('.close-modal').forEach(button => {
@@ -39,9 +37,9 @@ modalCancel.addEventListener('click', () => {
     confirmationModal.classList.remove('show');
 });
 
-modalConfirm.addEventListener('click', () => {
+modalConfirm.addEventListener('click', async () => {
     if (currentCatId) {
-        deleteCatFromDB(currentCatId);
+        await deleteCatFromDB(currentCatId);
         confirmationModal.classList.remove('show');
         fetchCats(searchInput.value);
         showAlert('Chat supprimé avec succès !', 'success');
@@ -60,113 +58,53 @@ window.addEventListener('click', (e) => {
 });
 
 // ============================================
-// BASE DE DONNÉES LOCALE (localStorage)
+// FONCTIONS API
 // ============================================
 
-// Initialiser la base de données
-function initDatabase() {
-    // Données de démo initiales
-    const demoCats = [
-        {
-            id: 1,
-            name_cats: "Mimi",
-            tag: "Siamois",
-            description: "Un chat calme et affectueux qui aime les câlins.",
-            images: "https://images.unsplash.com/photo-1514888286974-6d03bde4ba42?w=600"
-        },
-        {
-            id: 2,
-            name_cats: "Luna",
-            tag: "Persan",
-            description: "Belle chatte aux poils longs, très élégante.",
-            images: "https://images.unsplash.com/photo-1495360010541-f48722b34f7d?w=600"
-        },
-        {
-            id: 3,
-            name_cats: "Simba",
-            tag: "Maine Coon",
-            description: "Grand chat joueur et très sociable.",
-            images: "https://images.unsplash.com/photo-1513360371669-4adf3dd7dff8?w=600"
-        }
-    ];
-    
-    // Charger depuis localStorage ou initialiser avec les données de démo
-    const savedCats = localStorage.getItem('catsDatabase');
-    if (savedCats) {
-        catsDatabase = JSON.parse(savedCats);
-        nextId = Math.max(...catsDatabase.map(cat => cat.id)) + 1;
-    } else {
-        catsDatabase = demoCats;
-        nextId = 4;
-        saveToLocalStorage();
+// Récupérer tous les chats
+async function getAllCatsFromDB(search = '') {
+    const res = await fetch('/api/cats');
+    let cats = await res.json();
+    if (search.trim()) {
+        const searchLower = search.toLowerCase();
+        cats = cats.filter(cat =>
+            cat.name_cats.toLowerCase().includes(searchLower) ||
+            cat.tag.toLowerCase().includes(searchLower) ||
+            cat.description.toLowerCase().includes(searchLower)
+        );
     }
+    return cats;
 }
 
-// Sauvegarder dans localStorage
-function saveToLocalStorage() {
-    localStorage.setItem('catsDatabase', JSON.stringify(catsDatabase));
+// Ajouter un chat
+async function addCatToDB(cat) {
+    const res = await fetch('/api/cats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cat)
+    });
+    return await res.json();
 }
 
-// Ajouter un chat à la base de données
-function addCatToDB(cat) {
-    const newCat = {
-        id: nextId++,
-        name_cats: cat.name_cats,
-        tag: cat.tag,
-        description: cat.description,
-        images: cat.images
-    };
-    
-    catsDatabase.push(newCat);
-    saveToLocalStorage();
-    return newCat.id;
+// Modifier un chat
+async function updateCatInDB(id, cat) {
+    const res = await fetch(`/api/cats/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cat)
+    });
+    return await res.json();
 }
 
-// Supprimer un chat de la base de données
-function deleteCatFromDB(id) {
-    const index = catsDatabase.findIndex(cat => cat.id === id);
-    if (index !== -1) {
-        catsDatabase.splice(index, 1);
-        saveToLocalStorage();
-        return true;
-    }
-    return false;
-}
-
-// Modifier un chat dans la base de données
-function updateCatInDB(id, updatedCat) {
-    const index = catsDatabase.findIndex(cat => cat.id === id);
-    if (index !== -1) {
-        catsDatabase[index] = {
-            ...catsDatabase[index],
-            name_cats: updatedCat.name_cats,
-            tag: updatedCat.tag,
-            description: updatedCat.description,
-            images: updatedCat.images
-        };
-        saveToLocalStorage();
-        return true;
-    }
-    return false;
+// Supprimer un chat
+async function deleteCatFromDB(id) {
+    await fetch(`/api/cats/${id}`, { method: 'DELETE' });
 }
 
 // Récupérer un chat par ID
-function getCatFromDB(id) {
-    return catsDatabase.find(cat => cat.id === id);
-}
-
-// Récupérer tous les chats (avec recherche optionnelle)
-function getAllCatsFromDB(search = '') {
-    if (!search.trim()) {
-        return catsDatabase;
-    }
-    
-    const searchLower = search.toLowerCase();
-    return catsDatabase.filter(cat => 
-        cat.name_cats.toLowerCase().includes(searchLower) ||
-        cat.tag.toLowerCase().includes(searchLower) ||
-        cat.description.toLowerCase().includes(searchLower)
-    );
+async function getCatFromDB(id) {
+    const cats = await getAllCatsFromDB();
+    return cats.find(cat => cat.id === id);
 }
 
 // ============================================
@@ -174,15 +112,14 @@ function getAllCatsFromDB(search = '') {
 // ============================================
 
 // Afficher tous les chats
-function fetchCats(search = '') {
-    // Masquer/afficher le formulaire selon la recherche
+async function fetchCats(search = '') {
     if (search.trim() !== '') {
         formSection.style.display = 'none';
     } else {
         formSection.style.display = 'block';
     }
     
-    const cats = getAllCatsFromDB(search);
+    const cats = await getAllCatsFromDB(search);
     catsList.innerHTML = '';
 
     if (cats.length === 0) {
@@ -202,9 +139,9 @@ function fetchCats(search = '') {
         div.classList.add('cat-card');
         div.style.animationDelay = `${index * 0.1}s`;
         div.innerHTML = `
-            <img src="${cat.images || 'https://images.unsplash.com/photo-1514888286974-6d03bde4ba42?ixlib=rb-4.0.3&auto=format&fit=crop&w=600&q=80'}" 
+            <img src="${cat.images || 'https://images.unsplash.com/photo-1514888286974-6d03bde4ba42?w=600'}" 
                  alt="${cat.name_cats}" 
-                 onerror="this.src='https://images.unsplash.com/photo-1514888286974-6d03bde4ba42?ixlib=rb-4.0.3&auto=format&fit=crop&w=600&q=80'">
+                 onerror="this.src='https://images.unsplash.com/photo-1514888286974-6d03bde4ba42?w=600'">
             <div class="cat-card-content">
                 <h3>${cat.name_cats}</h3>
                 <div class="cat-tag">${cat.tag}</div>
@@ -224,7 +161,7 @@ function fetchCats(search = '') {
 }
 
 // Ajouter chat
-addBtn.addEventListener('click', () => {
+addBtn.addEventListener('click', async () => {
     if (!nameInput.value || !tagInput.value || !descInput.value || !imgInput.value) {
         showAlert("Veuillez remplir tous les champs !");
         return;
@@ -237,25 +174,20 @@ addBtn.addEventListener('click', () => {
         images: imgInput.value
     };
 
-    // Animation du bouton
     const originalText = addBtn.innerHTML;
     addBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Ajout...';
     addBtn.disabled = true;
 
-    // Simuler un délai d'ajout
-    setTimeout(() => {
-        addCatToDB(newCat);
+    try {
+        await addCatToDB(newCat);
 
-        // Réinitialiser
         nameInput.value = '';
         tagInput.value = '';
         descInput.value = '';
         imgInput.value = '';
 
-        // Succès visuel
         addBtn.innerHTML = '<i class="fas fa-check"></i> Ajouté !';
         addBtn.style.backgroundColor = '#10b981';
-        
         setTimeout(() => {
             addBtn.innerHTML = originalText;
             addBtn.style.backgroundColor = '';
@@ -263,7 +195,11 @@ addBtn.addEventListener('click', () => {
         }, 1500);
 
         fetchCats(searchInput.value);
-    }, 500);
+    } catch (error) {
+        showAlert('Erreur lors de l\'ajout du chat', 'danger');
+        addBtn.innerHTML = originalText;
+        addBtn.disabled = false;
+    }
 });
 
 // Supprimer chat
@@ -272,19 +208,14 @@ function deleteCat(id) {
     confirmationModal.classList.add('show');
 }
 
-// Modifier chat - FONCTION CORRECTE
-function editCat(id) {
-    // Récupérer le chat depuis la base de données
-    const cat = getCatFromDB(id);
-    
+// Modifier chat
+async function editCat(id) {
+    const cat = await getCatFromDB(id);
     if (!cat) {
-        showAlert('Chat non trouvé dans la base de données');
+        showAlert('Chat non trouvé dans la base de données', 'danger');
         return;
     }
-    
-    console.log('Chat trouvé pour modification:', cat);
-    
-    // Remplir la modale avec les données actuelles
+
     document.getElementById('editName').value = cat.name_cats;
     document.getElementById('editTag').value = cat.tag;
     document.getElementById('editDesc').value = cat.description;
@@ -292,65 +223,49 @@ function editCat(id) {
     
     currentCatId = id;
     editModal.classList.add('show');
-    
-    // Configurer le bouton Enregistrer
-    const saveHandler = () => {
-        const name = document.getElementById('editName').value;
-        const tag = document.getElementById('editTag').value;
-        const desc = document.getElementById('editDesc').value;
-        const img = document.getElementById('editImg').value;
+
+    const saveHandler = async () => {
+        const updatedCat = {
+            name_cats: document.getElementById('editName').value,
+            tag: document.getElementById('editTag').value,
+            description: document.getElementById('editDesc').value,
+            images: document.getElementById('editImg').value
+        };
         
-        if (!name || !tag || !desc || !img) {
+        if (!updatedCat.name_cats || !updatedCat.tag || !updatedCat.description || !updatedCat.images) {
             showAlert('Veuillez remplir tous les champs !');
             return;
         }
-        
-        // Animation
+
         const saveBtn = document.getElementById('editSave');
         const originalText = saveBtn.innerHTML;
         saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Enregistrement...';
         saveBtn.disabled = true;
-        
-        // Simuler un délai de sauvegarde
-        setTimeout(() => {
-            const updated = updateCatInDB(id, {
-                name_cats: name,
-                tag: tag,
-                description: desc,
-                images: img
-            });
-            
-            if (updated) {
-                editModal.classList.remove('show');
-                fetchCats(searchInput.value);
-                showAlert('Chat modifié avec succès !', 'success');
-            } else {
-                showAlert('Erreur lors de la modification');
-            }
-            
-            // Restaurer le bouton
-            saveBtn.innerHTML = originalText;
-            saveBtn.disabled = false;
-        }, 500);
+
+        try {
+            await updateCatInDB(id, updatedCat);
+            editModal.classList.remove('show');
+            fetchCats(searchInput.value);
+            showAlert('Chat modifié avec succès !', 'success');
+        } catch (error) {
+            showAlert('Erreur lors de la modification', 'danger');
+        }
+
+        saveBtn.innerHTML = originalText;
+        saveBtn.disabled = false;
     };
-    
-    // Configurer le bouton Annuler
-    const cancelHandler = () => {
-        editModal.classList.remove('show');
-    };
-    
-    // Retirer les anciens écouteurs et ajouter les nouveaux
+
+    const cancelHandler = () => editModal.classList.remove('show');
+
     const saveBtn = document.getElementById('editSave');
     const cancelBtn = document.getElementById('editCancel');
-    
-    // Cloner pour retirer les anciens écouteurs
+
     const newSaveBtn = saveBtn.cloneNode(true);
     const newCancelBtn = cancelBtn.cloneNode(true);
-    
+
     saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
     cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
-    
-    // Ajouter les nouveaux écouteurs
+
     newSaveBtn.addEventListener('click', saveHandler);
     newCancelBtn.addEventListener('click', cancelHandler);
 }
@@ -359,25 +274,16 @@ function editCat(id) {
 let searchTimeout;
 searchInput.addEventListener('input', (e) => {
     clearTimeout(searchTimeout);
+    if (e.target.value.trim() !== '') formSection.style.display = 'none';
+    else formSection.style.display = 'block';
     
-    // Masquer/afficher le formulaire
-    if (e.target.value.trim() !== '') {
-        formSection.style.display = 'none';
-    } else {
-        formSection.style.display = 'block';
-    }
-    
-    searchTimeout = setTimeout(() => {
-        fetchCats(e.target.value);
-    }, 300);
+    searchTimeout = setTimeout(() => fetchCats(e.target.value), 300);
 });
 
-// Fonction d'alerte personnalisée
+// Fonction d'alerte
 function showAlert(message, type = 'info') {
     const alertMessage = document.getElementById('alertMessage');
     alertMessage.textContent = message;
-    
-    // Couleur selon le type
     const header = alertModal.querySelector('.modal-header');
     const icon = header.querySelector('i');
     
@@ -397,73 +303,9 @@ function showAlert(message, type = 'info') {
 
 // Initialisation
 document.addEventListener('DOMContentLoaded', () => {
-    initDatabase();
     fetchCats();
-    
-    // Ajouter une animation au titre
     const title = document.querySelector('.header h1');
-    title.style.animation = 'fadeInDown 0.8s ease';
+    if (title) title.style.animation = 'fadeInDown 0.8s ease';
 });
 
-// ============================================
-// FONCTIONS UTILITAIRES
-// ============================================
-
-// Réinitialiser la base de données (pour le débogage)
-function resetDatabase() {
-    if (confirm('Voulez-vous réinitialiser la base de données ? Toutes les données seront perdues.')) {
-        localStorage.removeItem('catsDatabase');
-        initDatabase();
-        fetchCats();
-        showAlert('Base de données réinitialisée !', 'success');
-    }
-}
-
-// Exporter les données
-function exportData() {
-    const dataStr = JSON.stringify(catsDatabase, null, 2);
-    const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-    
-    const exportFileDefaultName = 'chats_backup.json';
-    
-    const linkElement = document.createElement('a');
-    linkElement.setAttribute('href', dataUri);
-    linkElement.setAttribute('download', exportFileDefaultName);
-    linkElement.click();
-    
-    showAlert('Données exportées avec succès !', 'success');
-}
-
-// Importer des données
-function importData() {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.json';
-    
-    input.onchange = e => {
-        const file = e.target.files[0];
-        const reader = new FileReader();
-        
-        reader.onload = event => {
-            try {
-                const importedData = JSON.parse(event.target.result);
-                catsDatabase = importedData;
-                nextId = Math.max(...catsDatabase.map(cat => cat.id)) + 1;
-                saveToLocalStorage();
-                fetchCats();
-                showAlert('Données importées avec succès !', 'success');
-            } catch (error) {
-                showAlert('Erreur lors de l\'importation: fichier JSON invalide');
-            }
-        };
-        
-        reader.readAsText(file);
-    };
-    
-    input.click();
-}
-
-// Ajouter ces fonctions au scope global pour les utiliser depuis la console
-window.resetDatabase = resetDatabase;
-window.exportData = exportData;
-window.importData = importData;
+/*filter*/
