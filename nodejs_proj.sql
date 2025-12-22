@@ -21,6 +21,16 @@ INSERT INTO users (id, username, email, password_hash, created_at, updated_at) V
 (1, 'ayman', 'ayman93011@gmail.com', 'Azerty123', '2025-12-17 14:15:02', '2025-12-17 14:15:02'),
 (2, 'user1', 'user@gmail.com', 'Azerty123', '2025-12-17 14:15:02', '2025-12-17 14:15:02');
 
+-- 2.5 Create user_sessions table for session-based authentication
+CREATE TABLE IF NOT EXISTS user_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  session_token TEXT NOT NULL UNIQUE,
+  expires_at TIMESTAMP NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 -- 3. Create cats table with FK to users
 CREATE TABLE IF NOT EXISTS cats (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
