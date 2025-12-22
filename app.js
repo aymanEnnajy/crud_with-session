@@ -57,11 +57,15 @@ export default {
         const body = await request.json();
         const { name_cats, tag, description, images } = body;
 
-        // Extraire userId depuis le token
+        // Validate session and get userId
         const authHeader = request.headers.get("Authorization");
         if (!authHeader) return new Response(JSON.stringify({ error: "Token manquant" }), { status: 401, headers: { "Content-Type": "application/json" } });
-        const token = authHeader.split(' ')[1];
-        const userId = token.split('-')[2];
+        const sessionToken = authHeader.split(' ')[1];
+
+        const { results: sessions } = await env.DB.prepare("SELECT user_id FROM user_sessions WHERE session_token = ? AND expires_at > datetime('now')")
+          .bind(sessionToken).all();
+        if (sessions.length === 0) return new Response(JSON.stringify({ error: "Session invalide. Veuillez vous reconnecter." }), { status: 401, headers: { "Content-Type": "application/json" } });
+        const userId = sessions[0].user_id;
 
         // Vérifier propriétaire
         const { results: cats } = await env.DB.prepare("SELECT id_user FROM cats WHERE id=?").bind(id).all();
@@ -89,11 +93,15 @@ export default {
       try {
         const id = url.pathname.split("/").pop();
 
-        // Extraire userId depuis le token
+        // Validate session and get userId
         const authHeader = request.headers.get("Authorization");
         if (!authHeader) return new Response(JSON.stringify({ error: "Token manquant" }), { status: 401, headers: { "Content-Type": "application/json" } });
-        const token = authHeader.split(' ')[1];
-        const userId = token.split('-')[2];
+        const sessionToken = authHeader.split(' ')[1];
+
+        const { results: sessions } = await env.DB.prepare("SELECT user_id FROM user_sessions WHERE session_token = ? AND expires_at > datetime('now')")
+          .bind(sessionToken).all();
+        if (sessions.length === 0) return new Response(JSON.stringify({ error: "Session invalide. Veuillez vous reconnecter." }), { status: 401, headers: { "Content-Type": "application/json" } });
+        const userId = sessions[0].user_id;
 
         // Vérifier propriétaire
         const { results: cats } = await env.DB.prepare("SELECT id_user FROM cats WHERE id=?").bind(id).all();
@@ -137,12 +145,19 @@ export default {
           .bind(username, email, password)
           .run();
 
-        const token = `simple-token-${lastInsertRowid}-${Date.now()}`;
+        // Create session with 30-day expiry
+        const sessionToken = crypto.randomUUID();
+        const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+
+        await env.DB
+          .prepare("INSERT INTO user_sessions (user_id, session_token, expires_at) VALUES (?, ?, ?)")
+          .bind(lastInsertRowid, sessionToken, expiresAt)
+          .run();
 
         return new Response(
           JSON.stringify({
             message: "Inscription réussie",
-            token,
+            token: sessionToken,
             user: { id: lastInsertRowid, username, email }
           }),
           { status: 201, headers: { "Content-Type": "application/json" } }
@@ -174,10 +189,18 @@ export default {
         }
 
         const user = users[0];
-        const token = `simple-token-${user.id}-${Date.now()}`;
+
+        // Create session with 30-day expiry
+        const sessionToken = crypto.randomUUID();
+        const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+
+        await env.DB
+          .prepare("INSERT INTO user_sessions (user_id, session_token, expires_at) VALUES (?, ?, ?)")
+          .bind(user.id, sessionToken, expiresAt)
+          .run();
 
         return new Response(
-          JSON.stringify({ message: "Connexion réussie", token, user: { id: user.id, username: user.username, email: user.email } }),
+          JSON.stringify({ message: "Connexion réussie", token: sessionToken, user: { id: user.id, username: user.username, email: user.email } }),
           { headers: { "Content-Type": "application/json" } }
         );
       } catch (err) {
@@ -195,33 +218,35 @@ export default {
         return new Response(JSON.stringify({ error: "Token manquant" }), { status: 401, headers: { "Content-Type": "application/json" } });
       }
 
-      const token = authHeader.split(' ')[1]; // Format: "Bearer token"
+      const sessionToken = authHeader.split(' ')[1]; // Format: "Bearer token"
 
-      if (!token) {
+      if (!sessionToken) {
         return new Response(JSON.stringify({ error: "Token mal formaté" }), { status: 401, headers: { "Content-Type": "application/json" } });
       }
 
-      // Vérification simple du token
-      const tokenParts = token.split('-');
-      if (tokenParts.length < 3 || tokenParts[0] !== 'simple' || tokenParts[1] !== 'token') {
-        return new Response(JSON.stringify({ error: "Token invalide" }), { status: 403, headers: { "Content-Type": "application/json" } });
-      }
-
-      const userId = tokenParts[2];
-
       try {
-        const { results: users } = await env.DB
-          .prepare("SELECT id, username, email FROM users WHERE id = ?")
-          .bind(userId)
+        // Verify session from database
+        const { results: sessions } = await env.DB
+          .prepare("SELECT s.*, u.id as user_id, u.username, u.email FROM user_sessions s JOIN users u ON s.user_id = u.id WHERE s.session_token = ?")
+          .bind(sessionToken)
           .all();
 
-        if (users.length === 0) {
-          return new Response(JSON.stringify({ error: "Utilisateur non trouvé" }), { status: 404, headers: { "Content-Type": "application/json" } });
+        if (sessions.length === 0) {
+          return new Response(JSON.stringify({ error: "Session invalide. Veuillez vous reconnecter." }), { status: 401, headers: { "Content-Type": "application/json" } });
+        }
+
+        const session = sessions[0];
+
+        // Check if session is expired
+        if (new Date(session.expires_at) < new Date()) {
+          // Delete expired session
+          await env.DB.prepare("DELETE FROM user_sessions WHERE session_token = ?").bind(sessionToken).run();
+          return new Response(JSON.stringify({ error: "Session expirée. Veuillez vous reconnecter." }), { status: 401, headers: { "Content-Type": "application/json" } });
         }
 
         return new Response(JSON.stringify({
           valid: true,
-          user: users[0]
+          user: { id: session.user_id, username: session.username, email: session.email }
         }), { headers: { "Content-Type": "application/json" } });
       } catch (err) {
         return new Response(JSON.stringify({ error: err.message }), { status: 500 });
@@ -232,10 +257,22 @@ export default {
     // ROUTE POST /api/auth/logout
     // -----------------------
     if (url.pathname === "/api/auth/logout" && method === "POST") {
-      return new Response(JSON.stringify({
-        message: 'Déconnexion réussie',
-        success: true
-      }), { headers: { "Content-Type": "application/json" } });
+      try {
+        const authHeader = request.headers.get("Authorization");
+        if (authHeader) {
+          const sessionToken = authHeader.split(' ')[1];
+          if (sessionToken) {
+            // Delete session from database
+            await env.DB.prepare("DELETE FROM user_sessions WHERE session_token = ?").bind(sessionToken).run();
+          }
+        }
+        return new Response(JSON.stringify({
+          message: 'Déconnexion réussie',
+          success: true
+        }), { headers: { "Content-Type": "application/json" } });
+      } catch (err) {
+        return new Response(JSON.stringify({ error: err.message }), { status: 500 });
+      }
     }
 
     // -----------------------
@@ -245,8 +282,13 @@ export default {
       try {
         const authHeader = request.headers.get("Authorization");
         if (!authHeader) return new Response(JSON.stringify({ error: "Non autorisé" }), { status: 401 });
-        const token = authHeader.split(' ')[1];
-        const userId = token.split('-')[2];
+        const sessionToken = authHeader.split(' ')[1];
+
+        // Validate session
+        const { results: sessions } = await env.DB.prepare("SELECT user_id FROM user_sessions WHERE session_token = ? AND expires_at > datetime('now')")
+          .bind(sessionToken).all();
+        if (sessions.length === 0) return new Response(JSON.stringify({ error: "Session invalide. Veuillez vous reconnecter." }), { status: 401 });
+        const userId = sessions[0].user_id;
 
         const { results } = await env.DB.prepare(`
           SELECT c.*, a.id as adoption_record_id, a.status as adoption_status 
@@ -272,14 +314,13 @@ export default {
         const { cat_id } = body;
         const authHeader = request.headers.get("Authorization");
         if (!authHeader) return new Response(JSON.stringify({ error: "Non autorisé" }), { status: 401 });
-        const token = authHeader.split(' ')[1];
-        const userId = token.split('-')[2];
+        const sessionToken = authHeader.split(' ')[1];
 
-        // Vérifier si l'utilisateur existe (pour éviter D1_ERROR: FOREIGN KEY constraint failed)
-        const { results: userExists } = await env.DB.prepare("SELECT id FROM users WHERE id = ?").bind(userId).all();
-        if (userExists.length === 0) {
-          return new Response(JSON.stringify({ error: "Utilisateur non trouvé. Veuillez vous reconnecter." }), { status: 401 });
-        }
+        // Validate session
+        const { results: sessions } = await env.DB.prepare("SELECT user_id FROM user_sessions WHERE session_token = ? AND expires_at > datetime('now')")
+          .bind(sessionToken).all();
+        if (sessions.length === 0) return new Response(JSON.stringify({ error: "Session invalide. Veuillez vous reconnecter." }), { status: 401 });
+        const userId = sessions[0].user_id;
 
         // Vérifier si déjà adopté par quelqu'un d'autre
         const { results: existing } = await env.DB.prepare("SELECT id FROM adoptions WHERE cat_id = ?").bind(cat_id).all();
@@ -305,8 +346,13 @@ export default {
         const catId = url.pathname.split("/").pop();
         const authHeader = request.headers.get("Authorization");
         if (!authHeader) return new Response(JSON.stringify({ error: "Non autorisé" }), { status: 401 });
-        const token = authHeader.split(' ')[1];
-        const userId = token.split('-')[2];
+        const sessionToken = authHeader.split(' ')[1];
+
+        // Validate session
+        const { results: sessions } = await env.DB.prepare("SELECT user_id FROM user_sessions WHERE session_token = ? AND expires_at > datetime('now')")
+          .bind(sessionToken).all();
+        if (sessions.length === 0) return new Response(JSON.stringify({ error: "Session invalide. Veuillez vous reconnecter." }), { status: 401 });
+        const userId = sessions[0].user_id;
 
         await env.DB.prepare("DELETE FROM adoptions WHERE cat_id = ? AND user_id = ?").bind(catId, userId).run();
 
@@ -330,8 +376,13 @@ export default {
 
         const authHeader = request.headers.get("Authorization");
         if (!authHeader) return new Response(JSON.stringify({ error: "Non autorisé" }), { status: 401 });
-        const token = authHeader.split(' ')[1];
-        const userId = token.split('-')[2];
+        const sessionToken = authHeader.split(' ')[1];
+
+        // Validate session
+        const { results: sessions } = await env.DB.prepare("SELECT user_id FROM user_sessions WHERE session_token = ? AND expires_at > datetime('now')")
+          .bind(sessionToken).all();
+        if (sessions.length === 0) return new Response(JSON.stringify({ error: "Session invalide. Veuillez vous reconnecter." }), { status: 401 });
+        const userId = sessions[0].user_id;
 
         // Vérifier que l'adoption appartient à l'utilisateur
         const { results: adoption } = await env.DB.prepare("SELECT * FROM adoptions WHERE cat_id = ? AND user_id = ?")
