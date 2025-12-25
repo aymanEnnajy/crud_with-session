@@ -1,5 +1,5 @@
 {
-    "name": "crud-cats",
+    "name": "jwt",
     "main": "app.js",
     "compatibility_date": "2025-12-25",
     "vars": {
